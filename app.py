@@ -32,20 +32,22 @@ st.set_page_config(
 )
 
 # =========================
-# قاعدة بيانات تجريبية في الذاكرة
+# قاعدة بيانات SQLite دائمة
 # =========================
+DB_FILE = "academic_planner.db"
+
 def init_db():
-    conn = sqlite3.connect(":memory:")
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     cur = conn.cursor()
     cur.executescript("""
-    CREATE TABLE Students (
+    CREATE TABLE IF NOT EXISTS Students (
         StudentID INTEGER PRIMARY KEY AUTOINCREMENT,
         Username TEXT UNIQUE,
         Password TEXT,
         FullName TEXT,
         Department TEXT
     );
-    CREATE TABLE Schedules (
+    CREATE TABLE IF NOT EXISTS Schedules (
         ScheduleID INTEGER PRIMARY KEY AUTOINCREMENT,
         StudentID INTEGER,
         Day TEXT,
@@ -54,7 +56,7 @@ def init_db():
         Subject TEXT,
         Room TEXT
     );
-    CREATE TABLE Tasks (
+    CREATE TABLE IF NOT EXISTS Tasks (
         TaskID INTEGER PRIMARY KEY AUTOINCREMENT,
         StudentID INTEGER,
         Title TEXT,
@@ -67,44 +69,64 @@ def init_db():
     return conn, cur
 
 def seed_demo(cur):
-    cur.execute("INSERT INTO Students (Username, Password, FullName, Department) VALUES (?,?,?,?)",
-                ("ahmed","1234","أحمد محمد","علوم الحاسوب"))
-    today = date.today()
-    cur.executemany("INSERT INTO Schedules (StudentID, Day, StartTime, EndTime, Subject, Room) VALUES (?,?,?,?,?,?)", [
-        (1,"الأحد","09:00","11:00","برمجة","A101"),
-        (1,"الاثنين","10:00","12:00","رياضيات","B201"),
-        (1,"الثلاثاء","11:00","13:00","ذكاء اصطناعي","A102"),
-        (1,"الأربعاء","09:00","11:00","فيزياء","C101"),
-        (1,"الخميس","10:00","12:00","نظم تشغيل","C301")
-    ])
-    cur.executemany("INSERT INTO Tasks (StudentID, Title, DueDate, EstHours, Priority) VALUES (?,?,?,?,?)", [
-        (1,"مشروع بايثون","%s"%(today + timedelta(days=3)),6.0,"High"),
-        (1,"واجب رياضيات","%s"%(today + timedelta(days=1)),2.0,"Medium"),
-        (1,"مراجعة الذكاء الاصطناعي","%s"%(today + timedelta(days=7)),4.0,"Low"),
-        (1,"تجهيز مختبر الفيزياء","%s"%(today + timedelta(days=2)),3.0,"High")
-    ])
+    cur.execute("SELECT COUNT(*) FROM Students")
+    if cur.fetchone()[0] == 0:  # إذا لم يكن هناك طلاب بعد
+        cur.execute(
+            "INSERT INTO Students (Username, Password, FullName, Department) VALUES (?,?,?,?)",
+            ("ahmed", "1234", "أحمد محمد", "علوم الحاسوب")
+        )
+        today = date.today()
+        cur.executemany(
+            "INSERT INTO Schedules (StudentID, Day, StartTime, EndTime, Subject, Room) VALUES (?,?,?,?,?,?)",
+            [
+                (1, "الأحد", "09:00", "11:00", "برمجة", "A101"),
+                (1, "الاثنين", "10:00", "12:00", "رياضيات", "B201"),
+                (1, "الثلاثاء", "11:00", "13:00", "ذكاء اصطناعي", "A102"),
+                (1, "الأربعاء", "09:00", "11:00", "فيزياء", "C101"),
+                (1, "الخميس", "10:00", "12:00", "نظم تشغيل", "C301")
+            ]
+        )
+        cur.executemany(
+            "INSERT INTO Tasks (StudentID, Title, DueDate, EstHours, Priority) VALUES (?,?,?,?,?)",
+            [
+                (1, "مشروع بايثون", str(today + timedelta(days=3)), 6.0, "High"),
+                (1, "واجب رياضيات", str(today + timedelta(days=1)), 2.0, "Medium"),
+                (1, "مراجعة الذكاء الاصطناعي", str(today + timedelta(days=7)), 4.0, "Low"),
+                (1, "تجهيز مختبر الفيزياء", str(today + timedelta(days=2)), 3.0, "High")
+            ]
+        )
 
 # =========================
 # دوال مساعدة
 # =========================
 def authenticate(cur, username, password):
-    cur.execute("SELECT StudentID, FullName, Department FROM Students WHERE Username=? AND Password=?", (username, password))
+    cur.execute(
+        "SELECT StudentID, FullName, Department FROM Students WHERE Username=? AND Password=?",
+        (username, password)
+    )
     return cur.fetchone()
 
 def fetch_schedule(cur, student_id):
-    cur.execute("SELECT ScheduleID, Day, StartTime, EndTime, Subject, Room FROM Schedules WHERE StudentID=? ORDER BY Day, StartTime", (student_id,))
+    cur.execute(
+        "SELECT ScheduleID, Day, StartTime, EndTime, Subject, Room FROM Schedules WHERE StudentID=? ORDER BY Day, StartTime",
+        (student_id,)
+    )
     return cur.fetchall()
 
 def fetch_tasks(cur, student_id):
-    cur.execute("SELECT TaskID, Title, DueDate, EstHours, Priority, Done FROM Tasks WHERE StudentID=? ORDER BY DueDate", (student_id,))
+    cur.execute(
+        "SELECT TaskID, Title, DueDate, EstHours, Priority, Done FROM Tasks WHERE StudentID=? ORDER BY DueDate",
+        (student_id,)
+    )
     return cur.fetchall()
 
-def update_task_done(cur, task_id):
+def update_task_done(cur, conn, task_id):
     cur.execute("UPDATE Tasks SET Done=1 WHERE TaskID=?", (task_id,))
+    conn.commit()
 
 def get_upcoming_tasks(tasks, days=3):
     now = date.today()
-    return [t for t in tasks if not t[5] and now <= date.fromisoformat(t[2]) <= now+timedelta(days=days)]
+    return [t for t in tasks if not t[5] and now <= date.fromisoformat(t[2]) <= now + timedelta(days=days)]
 
 def get_overdue_tasks(tasks):
     now = date.today()
@@ -117,14 +139,12 @@ def summarize_week(schedule, tasks):
     return week_tasks, schedule
 
 def plan_study(tasks):
-    plan = sorted([t for t in tasks if not t[5]], key=lambda x: (x[4], x[2]))
-    return plan
+    return sorted([t for t in tasks if not t[5]], key=lambda x: (x[4], x[2]))
 
 def ask_gpt(prompt):
-    # استدعاء GPT بالواجهة الجديدة
     response = openai.chat.completions.create(
         model="gpt-4",
-        messages=[{"role":"user","content":prompt}],
+        messages=[{"role": "user", "content": prompt}],
         temperature=0.5
     )
     return response.choices[0].message.content
@@ -135,6 +155,7 @@ def ask_gpt(prompt):
 def main():
     st.title("📘 المنظم الأكاديمي الذكي")
 
+    # تهيئة DB إذا لم تكن موجودة في session_state
     if "db_init" not in st.session_state:
         conn, cur = init_db()
         seed_demo(cur)
@@ -143,6 +164,7 @@ def main():
         st.session_state.cur = cur
         st.session_state.db_init = True
 
+    conn = st.session_state.conn
     cur = st.session_state.cur
 
     # تسجيل دخول الطالب
@@ -154,11 +176,7 @@ def main():
             if submit:
                 auth = authenticate(cur, username, password)
                 if auth:
-                    st.session_state.student = {
-                        "id": auth[0],
-                        "name": auth[1],
-                        "dept": auth[2]
-                    }
+                    st.session_state.student = {"id": auth[0], "name": auth[1], "dept": auth[2]}
                     st.success(f"مرحباً {auth[1]} 👋")
                 else:
                     st.error("❌ بيانات الدخول غير صحيحة")
@@ -207,7 +225,7 @@ def main():
         for t in tasks:
             if not t[5]:
                 if st.button(f"تم إنجاز: {t[1]}", key=t[0]):
-                    update_task_done(cur, t[0])
+                    update_task_done(cur, conn, t[0])
                     st.success(f"تم تحديث المهمة: {t[1]}")
 
     # شات GPT تفاعلي
