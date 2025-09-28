@@ -8,7 +8,6 @@ Original file is located at
 """
 
 #!pip install openai streamlit
-
 import streamlit as st
 from datetime import date, timedelta
 import sqlite3
@@ -122,7 +121,8 @@ def plan_study(tasks):
     return plan
 
 def ask_gpt(prompt):
-    response = openai.ChatCompletion.create(
+    # استدعاء GPT بالواجهة الجديدة
+    response = openai.chat.completions.create(
         model="gpt-4",
         messages=[{"role":"user","content":prompt}],
         temperature=0.5
@@ -224,4 +224,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
